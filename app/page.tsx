@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { removeImagesFromDocx } from "@/lib/docx";
 
 type Status =
   | { state: "idle" }
@@ -21,16 +22,11 @@ export default function Home() {
     setStatus({ state: "processing", name: file.name });
 
     try {
-      const body = new FormData();
-      body.append("file", file);
-      const res = await fetch("/api/remove-images", { method: "POST", body });
+      const result = await removeImagesFromDocx(await file.arrayBuffer());
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error ?? `Request failed (${res.status}).`);
-      }
-
-      const blob = await res.blob();
+      const blob = new Blob([result.data.slice().buffer], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      });
       const outName = file.name.replace(/\.docx$/i, "") + "-no-images.docx";
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -42,8 +38,8 @@ export default function Home() {
       setStatus({
         state: "done",
         name: outName,
-        images: Number(res.headers.get("X-Images-Removed") ?? 0),
-        media: Number(res.headers.get("X-Media-Removed") ?? 0),
+        images: result.removedElements,
+        media: result.removedMediaFiles,
       });
     } catch (err) {
       setStatus({
@@ -72,8 +68,9 @@ export default function Home() {
           Word Image Remover
         </h1>
         <p className="max-w-md text-sm text-gray-500 dark:text-gray-400">
-          Upload a .docx file and get back the same document with every image
-          stripped out. Text, formatting, and layout stay untouched.
+          Pick a .docx file and get back the same document with every image
+          stripped out. Text, formatting, and layout stay untouched. Everything
+          runs in your browser — files never leave your device.
         </p>
       </div>
 

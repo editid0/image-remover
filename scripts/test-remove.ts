@@ -114,7 +114,7 @@ async function main() {
     `removedElements=${result.removedElements} removedMediaFiles=${result.removedMediaFiles}`
   );
 
-  const out = await JSZip.loadAsync(result.buffer);
+  const out = await JSZip.loadAsync(result.data);
   const docXml = await out.file("word/document.xml")!.async("string");
   const hdrXml = await out.file("word/header1.xml")!.async("string");
   const docRels = await out.file("word/_rels/document.xml.rels")!.async("string");

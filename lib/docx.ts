@@ -13,7 +13,7 @@ const IMAGE_REL_TYPE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
 export interface RemoveImagesResult {
-  buffer: Buffer;
+  data: Uint8Array;
   /** Number of image elements stripped from the document XML. */
   removedElements: number;
   /** Number of media files deleted from the package. */
@@ -62,7 +62,7 @@ function resolveTarget(baseDir: string, target: string): string {
  * - Deletes media files in `word/media/` that nothing references anymore.
  */
 export async function removeImagesFromDocx(
-  input: ArrayBuffer | Buffer
+  input: ArrayBuffer | Uint8Array
 ): Promise<RemoveImagesResult> {
   let zip: JSZip;
   try {
@@ -165,10 +165,10 @@ export async function removeImagesFromDocx(
     }
   }
 
-  const buffer = await zip.generateAsync({
-    type: "nodebuffer",
+  const data = await zip.generateAsync({
+    type: "uint8array",
     compression: "DEFLATE",
   });
 
-  return { buffer, removedElements, removedMediaFiles };
+  return { data, removedElements, removedMediaFiles };
 }
