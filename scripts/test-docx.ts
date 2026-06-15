@@ -11,9 +11,11 @@ import {
   removeImagesFromDocx,
   extractImagesFromDocx,
   zipImages,
+  compressImagesInDocx,
   readDocxMetadata,
   scrubDocxMetadata,
   applyDocxMetadata,
+  type ImageEncoder,
 } from "../lib/docx";
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -202,6 +204,65 @@ async function testExtract(input: Buffer) {
   );
 }
 
+async function testCompress(input: Buffer) {
+  console.log("\ncompressImagesInDocx");
+  // A 4-byte stub, smaller than the test PNGs, that renames .png -> .jpeg.
+  const tinyJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+  const toJpeg: ImageEncoder = async () => ({
+    data: tinyJpeg,
+    ext: "jpeg",
+    contentType: "image/jpeg",
+  });
+
+  const result = await compressImagesInDocx(input, toJpeg);
+  assert(result.totalImages === 2, "saw 2 compressible images");
+  assert(result.recompressed === 2, "recompressed both images");
+  assert(result.originalBytes === PNG.length * 2, "original byte total summed");
+  assert(
+    result.compressedBytes === tinyJpeg.length * 2,
+    "compressed byte total summed"
+  );
+
+  const out = await JSZip.loadAsync(result.data);
+  assert(!out.file("word/media/image1.png"), "image1.png renamed away");
+  assert(!!out.file("word/media/image1.jpeg"), "image1.jpeg written");
+  assert(!!out.file("word/media/image2.jpeg"), "image2.jpeg written");
+
+  const docRels = await out.file("word/_rels/document.xml.rels")!.async("string");
+  const hdrRels = await out.file("word/_rels/header1.xml.rels")!.async("string");
+  assert(docRels.includes("media/image1.jpeg"), "document rel repointed to .jpeg");
+  assert(!docRels.includes("media/image1.png"), "old .png target gone from document rel");
+  assert(hdrRels.includes("media/image2.jpeg"), "header rel repointed to .jpeg");
+
+  const ct = await out.file("[Content_Types].xml")!.async("string");
+  assert(/Extension="jpeg"/.test(ct), "jpeg Default content type registered");
+
+  const docXml = await out.file("word/document.xml")!.async("string");
+  assert(
+    docXml.includes("Hello before image") && docXml.includes('r:embed="rId10"'),
+    "document text and blip reference untouched"
+  );
+
+  console.log("compressImagesInDocx (never grows a file)");
+  const bigger: ImageEncoder = async () => ({
+    data: new Uint8Array(PNG.length + 50),
+    ext: "jpeg",
+    contentType: "image/jpeg",
+  });
+  const kept = await compressImagesInDocx(input, bigger);
+  assert(kept.recompressed === 0, "nothing recompressed when result is larger");
+  assert(kept.compressedBytes === kept.originalBytes, "byte total unchanged");
+  const keptOut = await JSZip.loadAsync(kept.data);
+  assert(!!keptOut.file("word/media/image1.png"), "original png kept when not smaller");
+
+  console.log("compressImagesInDocx (skips undecodable / unchanged encoder)");
+  const noop: ImageEncoder = async () => null;
+  const noopResult = await compressImagesInDocx(input, noop);
+  assert(noopResult.recompressed === 0, "encoder returning null changes nothing");
+  const noopOut = await JSZip.loadAsync(noopResult.data);
+  assert(!!noopOut.file("word/media/image1.png"), "media untouched when encoder opts out");
+}
+
 async function testMetadata(input: Buffer) {
   console.log("\nreadDocxMetadata / scrubDocxMetadata");
   const fields = await readDocxMetadata(input);
@@ -342,6 +403,7 @@ async function main() {
   const input = await buildTestDocx();
   await testRemove(input);
   await testExtract(input);
+  await testCompress(input);
   await testMetadata(input);
   await testEdit(input);
   await testCreateParts();

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import RemovePanel from "./RemovePanel";
 import ExtractPanel from "./ExtractPanel";
+import CompressPanel from "./CompressPanel";
 import ScrubPanel from "./ScrubPanel";
 
 const MODES = [
@@ -17,6 +18,12 @@ const MODES = [
     label: "Extract images",
     blurb:
       "Pull every embedded image out of the document and download them individually or as a single zip.",
+  },
+  {
+    id: "compress",
+    label: "Compress images",
+    blurb:
+      "Shrink the file by re-encoding its images — smaller than Word's compression, with quality, format, and resolution you control.",
   },
   {
     id: "scrub",
@@ -66,6 +73,7 @@ export default function Home() {
 
       {mode === "remove" && <RemovePanel />}
       {mode === "extract" && <ExtractPanel />}
+      {mode === "compress" && <CompressPanel />}
       {mode === "scrub" && <ScrubPanel />}
     </main>
   );

@@ -240,6 +240,221 @@ export async function zipImages(images: ExtractedImage[]): Promise<Uint8Array> {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Image compression                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Raster formats the browser canvas can decode and therefore re-encode. Vector
+ * and exotic formats (emf, wmf, tiff, svg, ico) and animated gifs are left
+ * untouched so nothing is corrupted.
+ */
+const COMPRESSIBLE = new Set(["png", "jpg", "jpeg", "jpe", "bmp", "webp"]);
+
+/** A re-encoded image returned by an {@link ImageEncoder}. */
+export interface EncodedImage {
+  data: Uint8Array;
+  /** Lower-case file extension for the new bytes, e.g. "jpeg" or "webp". */
+  ext: string;
+  contentType: string;
+}
+
+/**
+ * Re-encodes a single image. Receives the original bytes, the source MIME type
+ * and the media file name; returns the re-encoded bytes (with their new
+ * extension/type) or `null` to leave the image unchanged. The browser
+ * implementation uses the canvas API ({@link "../app/encodeImage".makeEncoder});
+ * Node callers (tests) inject their own. Returning larger bytes is harmless —
+ * {@link compressImagesInDocx} keeps the original whenever the result is not
+ * strictly smaller.
+ */
+export type ImageEncoder = (
+  data: Uint8Array,
+  contentType: string,
+  name: string
+) => Promise<EncodedImage | null>;
+
+export interface CompressImagesResult {
+  data: Uint8Array;
+  /** Compressible images found in `word/media/`. */
+  totalImages: number;
+  /** Images actually replaced with smaller bytes. */
+  recompressed: number;
+  /** Combined size of the compressible images before compression. */
+  originalBytes: number;
+  /** Combined size after compression (originals kept where not smaller). */
+  compressedBytes: number;
+}
+
+/** Express an absolute package path relative to a .rels file's base directory. */
+function relativeTarget(baseDir: string, fullPath: string): string {
+  const base = baseDir.split("/").filter(Boolean);
+  const target = fullPath.split("/").filter(Boolean);
+  let i = 0;
+  while (i < base.length && i < target.length && base[i] === target[i]) i++;
+  const up = base.slice(i).map(() => "..");
+  return [...up, ...target.slice(i)].join("/");
+}
+
+/** Ensure `[Content_Types].xml` has a Default mapping for each new extension. */
+async function ensureDefaultContentTypes(
+  zip: JSZip,
+  parser: DOMParser,
+  serializer: XMLSerializer,
+  exts: Set<string>
+): Promise<void> {
+  if (exts.size === 0) return;
+  const ctFile = zip.file("[Content_Types].xml");
+  if (!ctFile) return;
+  const ctDoc = parser.parseFromString(await ctFile.async("string"), "application/xml");
+  const have = new Set(
+    toArray(ctDoc.getElementsByTagNameNS(CT_NS, "Default")).map((d) =>
+      (d.getAttribute("Extension") ?? "").toLowerCase()
+    )
+  );
+  let changed = false;
+  for (const ext of exts) {
+    if (have.has(ext)) continue;
+    const ct = IMAGE_CONTENT_TYPES[ext];
+    if (!ct) continue;
+    const def = ctDoc.createElementNS(CT_NS, "Default");
+    def.setAttribute("Extension", ext);
+    def.setAttribute("ContentType", ct);
+    ctDoc.documentElement!.appendChild(def);
+    have.add(ext);
+    changed = true;
+  }
+  if (changed) {
+    zip.file("[Content_Types].xml", serializer.serializeToString(ctDoc));
+  }
+}
+
+/**
+ * Re-encodes every image in a .docx through the supplied {@link ImageEncoder}
+ * to shrink the file. Beats Word's "Compress Pictures" because the encoder can
+ * use modern codecs (WebP), a tunable quality and an optional resolution cap.
+ *
+ * - Only raster formats the encoder can decode are touched ({@link COMPRESSIBLE});
+ *   everything else is left as-is.
+ * - An image is replaced only when the new bytes are strictly smaller, so the
+ *   output is never larger than the input.
+ * - When the format changes (e.g. PNG → JPEG), the media file is renamed and the
+ *   matching relationship `Target`s and `[Content_Types].xml` defaults are
+ *   updated. The document XML refers to images by relationship id, so it is left
+ *   untouched.
+ */
+export async function compressImagesInDocx(
+  input: ArrayBuffer | Uint8Array,
+  encode: ImageEncoder
+): Promise<CompressImagesResult> {
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(input);
+  } catch {
+    throw new Error("Not a valid .docx file (could not be read as a zip archive).");
+  }
+  if (!zip.file("word/document.xml")) {
+    throw new Error("Not a valid .docx file (missing word/document.xml).");
+  }
+
+  let totalImages = 0;
+  let recompressed = 0;
+  let originalBytes = 0;
+  let compressedBytes = 0;
+  // old media path -> new media path, for entries whose extension changed.
+  const renames = new Map<string, string>();
+  const newExts = new Set<string>();
+
+  const mediaPaths = Object.keys(zip.files).filter(
+    (p) => p.startsWith("word/media/") && !zip.files[p].dir
+  );
+
+  for (const path of mediaPaths) {
+    const name = path.slice("word/media/".length);
+    const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
+    if (!COMPRESSIBLE.has(ext)) continue;
+    const contentType = IMAGE_CONTENT_TYPES[ext];
+    if (!contentType) continue;
+
+    totalImages++;
+    const original = await zip.files[path].async("uint8array");
+    originalBytes += original.length;
+
+    let encoded: EncodedImage | null = null;
+    try {
+      encoded = await encode(original, contentType, name);
+    } catch {
+      encoded = null;
+    }
+
+    // Never grow a file: keep the original unless the result is strictly smaller.
+    if (!encoded || encoded.data.length >= original.length) {
+      compressedBytes += original.length;
+      continue;
+    }
+
+    recompressed++;
+    compressedBytes += encoded.data.length;
+
+    const newExt = encoded.ext.toLowerCase();
+    if (newExt === ext) {
+      zip.file(path, encoded.data);
+    } else {
+      const stem = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name;
+      let newName = `${stem}.${newExt}`;
+      let i = 1;
+      // Avoid colliding with an existing, different media entry.
+      while (zip.file(`word/media/${newName}`) && `word/media/${newName}` !== path) {
+        newName = `${stem}-${i++}.${newExt}`;
+      }
+      const newPath = `word/media/${newName}`;
+      zip.remove(path);
+      zip.file(newPath, encoded.data);
+      renames.set(path, newPath);
+      newExts.add(newExt);
+    }
+  }
+
+  // Repoint relationships at renamed media and register any new extensions.
+  if (renames.size > 0) {
+    const parser = new DOMParser();
+    const serializer = new XMLSerializer();
+
+    for (const relsName of Object.keys(zip.files).filter((n) => n.endsWith(".rels"))) {
+      const relsDoc = parser.parseFromString(
+        await zip.file(relsName)!.async("string"),
+        "application/xml"
+      );
+      const baseDir = relsName.replace(/_rels\/[^/]*$/, "");
+      let relsChanged = false;
+      for (const rel of toArray(
+        relsDoc.getElementsByTagNameNS(REL_NS, "Relationship")
+      )) {
+        if (rel.getAttribute("TargetMode") === "External") continue;
+        const target = rel.getAttribute("Target");
+        if (!target) continue;
+        const renamed = renames.get(resolveTarget(baseDir, target));
+        if (renamed) {
+          rel.setAttribute("Target", relativeTarget(baseDir, renamed));
+          relsChanged = true;
+        }
+      }
+      if (relsChanged) {
+        zip.file(relsName, serializer.serializeToString(relsDoc));
+      }
+    }
+
+    await ensureDefaultContentTypes(zip, parser, serializer, newExts);
+  }
+
+  const data = await zip.generateAsync({
+    type: "uint8array",
+    compression: "DEFLATE",
+  });
+
+  return { data, totalImages, recompressed, originalBytes, compressedBytes };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Metadata scrubbing                                                         */
 /* -------------------------------------------------------------------------- */
 
