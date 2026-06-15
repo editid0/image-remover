@@ -20,9 +20,9 @@ const MODES = [
   },
   {
     id: "scrub",
-    label: "Scrub metadata",
+    label: "Edit metadata",
     blurb:
-      "See the author, dates, and other hidden properties baked into the file, then choose which to strip.",
+      "See the author, dates, and other hidden properties baked into the file. Edit values, strip what you want gone, or add new Word properties.",
   },
 ] as const;
 

@@ -256,38 +256,71 @@ const CORE_PART = "docProps/core.xml";
 const APP_PART = "docProps/app.xml";
 const CUSTOM_PART = "docProps/custom.xml";
 
+const VT_NS = "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes";
+const XSI_NS = "http://www.w3.org/2001/XMLSchema-instance";
+const CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types";
+const OFFICE_REL =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const CORE_REL_TYPE =
+  "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties";
+/** Standard format id Word uses for the custom-properties store. */
+const CUSTOM_FMTID = "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}";
+
+/** Input hint for a metadata value, so the UI can pick a sensible control. */
+export type MetadataKind = "text" | "date" | "number";
+
 interface FieldDescriptor {
   id: string;
   label: string;
   group: string;
   /** Privacy-relevant fields that are pre-selected for removal. */
   sensitive: boolean;
+  kind: MetadataKind;
   part: string;
   ns: string;
   local: string;
+  /** Qualified name used when creating the element (prefix matches the part). */
+  qualified: string;
+  /** Core date fields carry an `xsi:type="dcterms:W3CDTF"` attribute. */
+  w3cdtf?: boolean;
 }
 
-/** Known metadata fields in the core and extended property parts. */
+/** Known metadata fields Word writes into the core and extended property parts. */
 const FIELD_DESCRIPTORS: FieldDescriptor[] = [
-  { id: "core:creator", label: "Author", group: "People", sensitive: true, part: CORE_PART, ns: DC_NS, local: "creator" },
-  { id: "core:lastModifiedBy", label: "Last modified by", group: "People", sensitive: true, part: CORE_PART, ns: CP_NS, local: "lastModifiedBy" },
-  { id: "app:Company", label: "Company", group: "People", sensitive: true, part: APP_PART, ns: EXT_NS, local: "Company" },
-  { id: "app:Manager", label: "Manager", group: "People", sensitive: true, part: APP_PART, ns: EXT_NS, local: "Manager" },
-  { id: "core:title", label: "Title", group: "Document", sensitive: false, part: CORE_PART, ns: DC_NS, local: "title" },
-  { id: "core:subject", label: "Subject", group: "Document", sensitive: false, part: CORE_PART, ns: DC_NS, local: "subject" },
-  { id: "core:description", label: "Comments", group: "Document", sensitive: false, part: CORE_PART, ns: DC_NS, local: "description" },
-  { id: "core:keywords", label: "Keywords / tags", group: "Document", sensitive: false, part: CORE_PART, ns: CP_NS, local: "keywords" },
-  { id: "core:category", label: "Category", group: "Document", sensitive: false, part: CORE_PART, ns: CP_NS, local: "category" },
-  { id: "core:contentStatus", label: "Content status", group: "Document", sensitive: false, part: CORE_PART, ns: CP_NS, local: "contentStatus" },
-  { id: "app:Template", label: "Template", group: "Document", sensitive: false, part: APP_PART, ns: EXT_NS, local: "Template" },
-  { id: "core:created", label: "Created", group: "Dates", sensitive: true, part: CORE_PART, ns: DCTERMS_NS, local: "created" },
-  { id: "core:modified", label: "Modified", group: "Dates", sensitive: true, part: CORE_PART, ns: DCTERMS_NS, local: "modified" },
-  { id: "core:lastPrinted", label: "Last printed", group: "Dates", sensitive: true, part: CORE_PART, ns: CP_NS, local: "lastPrinted" },
-  { id: "core:revision", label: "Revision number", group: "Activity", sensitive: true, part: CORE_PART, ns: CP_NS, local: "revision" },
-  { id: "app:TotalTime", label: "Total editing time", group: "Activity", sensitive: true, part: APP_PART, ns: EXT_NS, local: "TotalTime" },
-  { id: "app:Application", label: "Application", group: "Activity", sensitive: false, part: APP_PART, ns: EXT_NS, local: "Application" },
-  { id: "app:AppVersion", label: "App version", group: "Activity", sensitive: false, part: APP_PART, ns: EXT_NS, local: "AppVersion" },
+  { id: "core:creator", label: "Author", group: "People", sensitive: true, kind: "text", part: CORE_PART, ns: DC_NS, local: "creator", qualified: "dc:creator" },
+  { id: "core:lastModifiedBy", label: "Last modified by", group: "People", sensitive: true, kind: "text", part: CORE_PART, ns: CP_NS, local: "lastModifiedBy", qualified: "cp:lastModifiedBy" },
+  { id: "app:Company", label: "Company", group: "People", sensitive: true, kind: "text", part: APP_PART, ns: EXT_NS, local: "Company", qualified: "Company" },
+  { id: "app:Manager", label: "Manager", group: "People", sensitive: true, kind: "text", part: APP_PART, ns: EXT_NS, local: "Manager", qualified: "Manager" },
+  { id: "core:title", label: "Title", group: "Document", sensitive: false, kind: "text", part: CORE_PART, ns: DC_NS, local: "title", qualified: "dc:title" },
+  { id: "core:subject", label: "Subject", group: "Document", sensitive: false, kind: "text", part: CORE_PART, ns: DC_NS, local: "subject", qualified: "dc:subject" },
+  { id: "core:description", label: "Comments", group: "Document", sensitive: false, kind: "text", part: CORE_PART, ns: DC_NS, local: "description", qualified: "dc:description" },
+  { id: "core:keywords", label: "Keywords / tags", group: "Document", sensitive: false, kind: "text", part: CORE_PART, ns: CP_NS, local: "keywords", qualified: "cp:keywords" },
+  { id: "core:category", label: "Category", group: "Document", sensitive: false, kind: "text", part: CORE_PART, ns: CP_NS, local: "category", qualified: "cp:category" },
+  { id: "core:contentStatus", label: "Content status", group: "Document", sensitive: false, kind: "text", part: CORE_PART, ns: CP_NS, local: "contentStatus", qualified: "cp:contentStatus" },
+  { id: "app:Template", label: "Template", group: "Document", sensitive: false, kind: "text", part: APP_PART, ns: EXT_NS, local: "Template", qualified: "Template" },
+  { id: "core:created", label: "Created", group: "Dates", sensitive: true, kind: "date", part: CORE_PART, ns: DCTERMS_NS, local: "created", qualified: "dcterms:created", w3cdtf: true },
+  { id: "core:modified", label: "Modified", group: "Dates", sensitive: true, kind: "date", part: CORE_PART, ns: DCTERMS_NS, local: "modified", qualified: "dcterms:modified", w3cdtf: true },
+  { id: "core:lastPrinted", label: "Last printed", group: "Dates", sensitive: true, kind: "date", part: CORE_PART, ns: CP_NS, local: "lastPrinted", qualified: "cp:lastPrinted" },
+  { id: "core:revision", label: "Revision number", group: "Activity", sensitive: true, kind: "number", part: CORE_PART, ns: CP_NS, local: "revision", qualified: "cp:revision" },
+  { id: "app:TotalTime", label: "Total editing time", group: "Activity", sensitive: true, kind: "number", part: APP_PART, ns: EXT_NS, local: "TotalTime", qualified: "TotalTime" },
+  { id: "app:Application", label: "Application", group: "Activity", sensitive: false, kind: "text", part: APP_PART, ns: EXT_NS, local: "Application", qualified: "Application" },
+  { id: "app:AppVersion", label: "App version", group: "Activity", sensitive: false, kind: "text", part: APP_PART, ns: EXT_NS, local: "AppVersion", qualified: "AppVersion" },
 ];
+
+const DESCRIPTOR_BY_ID = new Map(FIELD_DESCRIPTORS.map((d) => [d.id, d]));
+
+/** A known metadata field the UI can offer to add to a document. */
+export interface MetadataFieldDef {
+  id: string;
+  label: string;
+  group: string;
+  kind: MetadataKind;
+}
+
+/** Catalogue of the standard Word metadata fields, for an "add field" menu. */
+export const METADATA_CATALOG: MetadataFieldDef[] = FIELD_DESCRIPTORS.map(
+  (d) => ({ id: d.id, label: d.label, group: d.group, kind: d.kind })
+);
 
 export interface MetadataField {
   id: string;
@@ -295,6 +328,9 @@ export interface MetadataField {
   value: string;
   group: string;
   sensitive: boolean;
+  kind: MetadataKind;
+  /** True for user-defined custom properties (the label is the property name). */
+  custom: boolean;
 }
 
 export interface ScrubMetadataResult {
@@ -303,8 +339,52 @@ export interface ScrubMetadataResult {
   removed: number;
 }
 
+/** A set of metadata changes to apply: values to set/create and ids to remove. */
+export interface MetadataEdit {
+  /** Maps a field id to its new value. Creates the field if it does not exist. */
+  set?: Record<string, string>;
+  /** Field ids to delete. Removals are applied before sets. */
+  remove?: string[];
+}
+
+export interface ApplyMetadataResult {
+  data: Uint8Array;
+  /** Number of fields removed. */
+  removed: number;
+  /** Number of fields created or updated. */
+  changed: number;
+}
+
+/** Skeleton document for a property part that has to be created from scratch. */
+const PART_SKELETON: Record<string, string> = {
+  [CORE_PART]: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<cp:coreProperties xmlns:cp="${CP_NS}" xmlns:dc="${DC_NS}" xmlns:dcterms="${DCTERMS_NS}" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="${XSI_NS}"></cp:coreProperties>`,
+  [APP_PART]: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Properties xmlns="${EXT_NS}" xmlns:vt="${VT_NS}"></Properties>`,
+  [CUSTOM_PART]: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Properties xmlns="${CUSTOM_NS}" xmlns:vt="${VT_NS}"></Properties>`,
+};
+
+/** Content type and package relationship type for each property part. */
+const PART_META: Record<string, { ct: string; relType: string }> = {
+  [CORE_PART]: {
+    ct: "application/vnd.openxmlformats-package.core-properties+xml",
+    relType: CORE_REL_TYPE,
+  },
+  [APP_PART]: {
+    ct: "application/vnd.openxmlformats-officedocument.extended-properties+xml",
+    relType: `${OFFICE_REL}/extended-properties`,
+  },
+  [CUSTOM_PART]: {
+    ct: "application/vnd.openxmlformats-officedocument.custom-properties+xml",
+    relType: `${OFFICE_REL}/custom-properties`,
+  },
+};
+
 function textOf(el: XmlElement): string {
   return (el.textContent ?? "").trim();
+}
+
+function setText(el: XmlElement, value: string): void {
+  while (el.firstChild) el.removeChild(el.firstChild);
+  el.appendChild(el.ownerDocument!.createTextNode(value));
 }
 
 function firstElement(
@@ -314,6 +394,13 @@ function firstElement(
 ): XmlElement | null {
   const list = doc.getElementsByTagNameNS(ns, local);
   return list.length > 0 ? list.item(0) : null;
+}
+
+function firstChildElement(el: XmlElement): XmlElement | null {
+  for (let n = el.firstChild; n; n = n.nextSibling) {
+    if (n.nodeType === 1) return n as XmlElement;
+  }
+  return null;
 }
 
 async function loadParts(
@@ -332,8 +419,7 @@ async function loadParts(
 
 /**
  * Reads the document, application and custom metadata present in a .docx file.
- * Only fields that are actually present (with a non-empty value) are returned,
- * so the result mirrors what a metadata scrub would offer to strip.
+ * Only fields with a non-empty value are returned.
  */
 export async function readDocxMetadata(
   input: ArrayBuffer | Uint8Array
@@ -356,7 +442,15 @@ export async function readDocxMetadata(
     if (!el) continue;
     const value = textOf(el);
     if (!value) continue;
-    fields.push({ id: d.id, label: d.label, value, group: d.group, sensitive: d.sensitive });
+    fields.push({
+      id: d.id,
+      label: d.label,
+      value,
+      group: d.group,
+      sensitive: d.sensitive,
+      kind: d.kind,
+      custom: false,
+    });
   }
 
   const customDoc = docs.get(CUSTOM_PART);
@@ -372,6 +466,8 @@ export async function readDocxMetadata(
         value,
         group: "Custom",
         sensitive: true,
+        kind: "text",
+        custom: true,
       });
     }
   }
@@ -379,14 +475,139 @@ export async function readDocxMetadata(
   return fields;
 }
 
+/** Add the content-type override and package relationship for a new part. */
+async function registerPart(
+  part: string,
+  zip: JSZip,
+  parser: DOMParser,
+  serializer: XMLSerializer
+): Promise<void> {
+  const meta = PART_META[part];
+
+  const ctFile = zip.file("[Content_Types].xml");
+  if (ctFile) {
+    const ctDoc = parser.parseFromString(await ctFile.async("string"), "application/xml");
+    const exists = toArray(ctDoc.getElementsByTagNameNS(CT_NS, "Override")).some(
+      (o) => o.getAttribute("PartName") === `/${part}`
+    );
+    if (!exists) {
+      const ov = ctDoc.createElementNS(CT_NS, "Override");
+      ov.setAttribute("PartName", `/${part}`);
+      ov.setAttribute("ContentType", meta.ct);
+      ctDoc.documentElement!.appendChild(ov);
+      zip.file("[Content_Types].xml", serializer.serializeToString(ctDoc));
+    }
+  }
+
+  const relsFile = zip.file("_rels/.rels");
+  if (relsFile) {
+    const relsDoc = parser.parseFromString(await relsFile.async("string"), "application/xml");
+    const rels = toArray(relsDoc.getElementsByTagNameNS(REL_NS, "Relationship"));
+    const linked = rels.some(
+      (r) => r.getAttribute("Target")?.replace(/^\//, "") === part
+    );
+    if (!linked) {
+      let max = 0;
+      for (const r of rels) {
+        const m = /^rId(\d+)$/.exec(r.getAttribute("Id") ?? "");
+        if (m) max = Math.max(max, parseInt(m[1], 10));
+      }
+      const rel = relsDoc.createElementNS(REL_NS, "Relationship");
+      rel.setAttribute("Id", `rId${max + 1}`);
+      rel.setAttribute("Type", meta.relType);
+      rel.setAttribute("Target", part);
+      relsDoc.documentElement!.appendChild(rel);
+      zip.file("_rels/.rels", serializer.serializeToString(relsDoc));
+    }
+  }
+}
+
+/** Return the parsed property part, creating and registering it if absent. */
+async function ensurePart(
+  part: string,
+  zip: JSZip,
+  parser: DOMParser,
+  serializer: XMLSerializer,
+  docs: Map<string, XmlDocument>,
+  changed: Set<string>
+): Promise<XmlDocument> {
+  const existing = docs.get(part);
+  if (existing) return existing;
+  const doc = parser.parseFromString(PART_SKELETON[part], "application/xml");
+  docs.set(part, doc);
+  changed.add(part);
+  await registerPart(part, zip, parser, serializer);
+  return doc;
+}
+
+function setKnownField(doc: XmlDocument, d: FieldDescriptor, value: string): void {
+  let el = firstElement(doc, d.ns, d.local);
+  if (!el) {
+    el = doc.createElementNS(d.ns, d.qualified);
+    if (d.w3cdtf) el.setAttributeNS(XSI_NS, "xsi:type", "dcterms:W3CDTF");
+    doc.documentElement!.appendChild(el);
+  }
+  setText(el, value);
+}
+
+function setCustomProp(doc: XmlDocument, name: string, value: string): void {
+  let maxPid = 1;
+  for (const prop of toArray(doc.getElementsByTagNameNS(CUSTOM_NS, "property"))) {
+    const pid = parseInt(prop.getAttribute("pid") ?? "", 10);
+    if (!Number.isNaN(pid)) maxPid = Math.max(maxPid, pid);
+    if (prop.getAttribute("name") === name) {
+      const child = firstChildElement(prop);
+      if (child) {
+        setText(child, value);
+      } else {
+        const v = doc.createElementNS(VT_NS, "vt:lpwstr");
+        setText(v, value);
+        prop.appendChild(v);
+      }
+      return;
+    }
+  }
+  const prop = doc.createElementNS(CUSTOM_NS, "property");
+  prop.setAttribute("fmtid", CUSTOM_FMTID);
+  prop.setAttribute("pid", String(maxPid + 1));
+  prop.setAttribute("name", name);
+  const v = doc.createElementNS(VT_NS, "vt:lpwstr");
+  setText(v, value);
+  prop.appendChild(v);
+  doc.documentElement!.appendChild(prop);
+}
+
+function removeKnownField(doc: XmlDocument, d: FieldDescriptor): boolean {
+  const el = firstElement(doc, d.ns, d.local);
+  if (el && el.parentNode) {
+    el.parentNode.removeChild(el);
+    return true;
+  }
+  return false;
+}
+
+function removeCustomProp(doc: XmlDocument, name: string): boolean {
+  let removed = false;
+  for (const prop of toArray(doc.getElementsByTagNameNS(CUSTOM_NS, "property"))) {
+    if (prop.getAttribute("name") === name && prop.parentNode) {
+      prop.parentNode.removeChild(prop);
+      removed = true;
+    }
+  }
+  return removed;
+}
+
 /**
- * Removes the selected metadata entries from a .docx file. `ids` are the
- * {@link MetadataField.id} values to strip; everything else is left untouched.
+ * Applies a set of metadata edits to a .docx file: updates or creates the
+ * fields in `set` and deletes the ids in `remove`. Known fields are written to
+ * the core/extended property parts; `custom:<name>` ids become custom document
+ * properties. Missing property parts (and their content-type / relationship
+ * wiring) are created as needed.
  */
-export async function scrubDocxMetadata(
+export async function applyDocxMetadata(
   input: ArrayBuffer | Uint8Array,
-  ids: string[]
-): Promise<ScrubMetadataResult> {
+  edit: MetadataEdit
+): Promise<ApplyMetadataResult> {
   let zip: JSZip;
   try {
     zip = await JSZip.loadAsync(input);
@@ -397,31 +618,42 @@ export async function scrubDocxMetadata(
   const parser = new DOMParser();
   const serializer = new XMLSerializer();
   const docs = await loadParts(zip, parser);
-  const selected = new Set(ids);
   const changed = new Set<string>();
   let removed = 0;
+  let updated = 0;
 
-  for (const d of FIELD_DESCRIPTORS) {
-    if (!selected.has(d.id)) continue;
-    const doc = docs.get(d.part);
-    if (!doc) continue;
-    const el = firstElement(doc, d.ns, d.local);
-    if (el && el.parentNode) {
-      el.parentNode.removeChild(el);
-      changed.add(d.part);
-      removed++;
-    }
-  }
-
-  const customDoc = docs.get(CUSTOM_PART);
-  if (customDoc) {
-    for (const prop of toArray(customDoc.getElementsByTagNameNS(CUSTOM_NS, "property"))) {
-      const name = prop.getAttribute("name");
-      if (name && selected.has(`custom:${name}`) && prop.parentNode) {
-        prop.parentNode.removeChild(prop);
+  for (const id of edit.remove ?? []) {
+    if (id.startsWith("custom:")) {
+      const doc = docs.get(CUSTOM_PART);
+      if (doc && removeCustomProp(doc, id.slice(7))) {
         changed.add(CUSTOM_PART);
         removed++;
       }
+    } else {
+      const d = DESCRIPTOR_BY_ID.get(id);
+      const doc = d && docs.get(d.part);
+      if (d && doc && removeKnownField(doc, d)) {
+        changed.add(d.part);
+        removed++;
+      }
+    }
+  }
+
+  for (const [id, value] of Object.entries(edit.set ?? {})) {
+    if (id.startsWith("custom:")) {
+      const name = id.slice(7).trim();
+      if (!name) continue;
+      const doc = await ensurePart(CUSTOM_PART, zip, parser, serializer, docs, changed);
+      setCustomProp(doc, name, value);
+      changed.add(CUSTOM_PART);
+      updated++;
+    } else {
+      const d = DESCRIPTOR_BY_ID.get(id);
+      if (!d) continue;
+      const doc = await ensurePart(d.part, zip, parser, serializer, docs, changed);
+      setKnownField(doc, d, value);
+      changed.add(d.part);
+      updated++;
     }
   }
 
@@ -434,5 +666,18 @@ export async function scrubDocxMetadata(
     compression: "DEFLATE",
   });
 
+  return { data, removed, changed: updated };
+}
+
+/**
+ * Removes the selected metadata entries from a .docx file. `ids` are the
+ * {@link MetadataField.id} values to strip; everything else is left untouched.
+ * Thin wrapper over {@link applyDocxMetadata}.
+ */
+export async function scrubDocxMetadata(
+  input: ArrayBuffer | Uint8Array,
+  ids: string[]
+): Promise<ScrubMetadataResult> {
+  const { data, removed } = await applyDocxMetadata(input, { remove: ids });
   return { data, removed };
 }

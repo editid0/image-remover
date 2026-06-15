@@ -13,6 +13,7 @@ import {
   zipImages,
   readDocxMetadata,
   scrubDocxMetadata,
+  applyDocxMetadata,
 } from "../lib/docx";
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -243,11 +244,107 @@ async function testMetadata(input: Buffer) {
   assert(!!out.file("word/media/image1.png"), "scrub leaves images intact");
 }
 
+async function testEdit(input: Buffer) {
+  console.log("\napplyDocxMetadata (edit existing parts)");
+  const result = await applyDocxMetadata(input, {
+    set: {
+      "core:title": "Edited Title",
+      "core:keywords": "alpha, beta",
+      "custom:Project": "Apollo",
+    },
+    remove: ["app:Company"],
+  });
+  assert(result.changed === 3, "set 3 fields");
+  assert(result.removed === 1, "removed 1 field");
+
+  const out = await JSZip.loadAsync(result.data);
+  const core = await out.file("docProps/core.xml")!.async("string");
+  const app = await out.file("docProps/app.xml")!.async("string");
+  const custom = await out.file("docProps/custom.xml")!.async("string");
+  assert(core.includes("Edited Title"), "title updated in place");
+  assert(!core.includes("Quarterly Report"), "old title value gone");
+  assert(core.includes("alpha, beta"), "new keywords field created");
+  assert(!app.includes("Acme Corp"), "company removed");
+  assert(custom.includes("Apollo") && custom.includes("SECRET-123"), "custom prop added alongside existing");
+
+  const meta = new Map((await readDocxMetadata(result.data)).map((f) => [f.id, f.value]));
+  assert(meta.get("core:title") === "Edited Title", "re-read sees edited title");
+  assert(meta.get("core:keywords") === "alpha, beta", "re-read sees new keywords");
+  assert(meta.get("custom:Project") === "Apollo", "re-read sees new custom prop");
+  assert(!meta.has("app:Company"), "re-read no longer sees company");
+}
+
+async function buildBareDocx(): Promise<Buffer> {
+  const zip = new JSZip();
+  zip.file(
+    "[Content_Types].xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`
+  );
+  zip.file(
+    "_rels/.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="${PKG_R}">
+  <Relationship Id="rId1" Type="${R}/officeDocument" Target="word/document.xml"/>
+</Relationships>`
+  );
+  zip.file(
+    "word/document.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="${W}"><w:body><w:p><w:r><w:t>Bare</w:t></w:r></w:p></w:body></w:document>`
+  );
+  return zip.generateAsync({ type: "nodebuffer" });
+}
+
+async function testCreateParts() {
+  console.log("\napplyDocxMetadata (create missing parts)");
+  const bare = await buildBareDocx();
+  const result = await applyDocxMetadata(bare, {
+    set: {
+      "core:creator": "New Author",
+      "core:created": "2026-06-15T00:00:00Z",
+      "app:Company": "NewCo",
+      "custom:Foo": "Bar",
+    },
+  });
+  assert(result.changed === 4, "set 4 fields into a doc with no docProps");
+
+  const out = await JSZip.loadAsync(result.data);
+  assert(!!out.file("docProps/core.xml"), "core.xml created");
+  assert(!!out.file("docProps/app.xml"), "app.xml created");
+  assert(!!out.file("docProps/custom.xml"), "custom.xml created");
+
+  const core = await out.file("docProps/core.xml")!.async("string");
+  assert(core.includes("New Author"), "author written to new core.xml");
+  assert(
+    core.includes('xsi:type="dcterms:W3CDTF"') && core.includes("2026-06-15T00:00:00Z"),
+    "created date written with W3CDTF type"
+  );
+
+  const ct = await out.file("[Content_Types].xml")!.async("string");
+  assert(ct.includes("/docProps/core.xml"), "content-type override added for core");
+  assert(ct.includes("/docProps/custom.xml"), "content-type override added for custom");
+
+  const rels = await out.file("_rels/.rels")!.async("string");
+  assert(rels.includes("docProps/app.xml"), "package relationship added for app");
+
+  const meta = new Map((await readDocxMetadata(result.data)).map((f) => [f.id, f.value]));
+  assert(meta.get("core:creator") === "New Author", "re-read author from created part");
+  assert(meta.get("app:Company") === "NewCo", "re-read company from created part");
+  assert(meta.get("custom:Foo") === "Bar", "re-read custom prop from created part");
+}
+
 async function main() {
   const input = await buildTestDocx();
   await testRemove(input);
   await testExtract(input);
   await testMetadata(input);
+  await testEdit(input);
+  await testCreateParts();
   console.log(process.exitCode ? "\nTEST FAILED" : "\nALL TESTS PASSED");
 }
 
