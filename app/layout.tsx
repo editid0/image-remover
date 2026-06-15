@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Word Image Remover",
+  title: "Word Doc Toolkit",
   description:
-    "Upload a .docx file and download it back with all images removed.",
+    "Remove or extract images and scrub metadata from .docx files, entirely in your browser.",
 };
 
 export default function RootLayout({
